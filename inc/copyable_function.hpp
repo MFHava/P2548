@@ -195,19 +195,20 @@ namespace p2548 {
 		template<typename T>
 		using add_inv_quals = internal::add_refness_t<add_const<T>, ref_::value == internal::refness::none ? internal::refness::lvalue : ref_::value>;
 
+		enum class mode { dtor, move, dmove, copy, };
+
 		union storage_t {
 			void * ptr;
 			char sbo[sizeof(void * ) * 3];
 		};
 		const struct vtable final {
-			auto (*manage)(storage_t *, storage_t *, bool) noexcept -> bool;
-			void (*clone)(const storage_t *, storage_t *); //TODO: merge into manage
+			auto (*manage)(storage_t *, storage_t *, mode) -> bool;
 			auto (*dispatch)(add_const<storage_t> *, Args...) noexcept(noexcept_) -> Result;
 
-			void dtor(storage_t * self) const noexcept { manage(self, nullptr, false); }
-			auto move(storage_t * from, storage_t * to) const noexcept -> bool { return manage(from, to, false); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
-			void destructive_move(storage_t * from, storage_t * to) const noexcept { manage(from, to, true); }
-			void copy(const storage_t * from, storage_t * to) const { clone(from, to); }
+			void dtor(storage_t * self) const noexcept { manage(self, nullptr, mode::dtor); }
+			auto move(storage_t * from, storage_t * to) const noexcept -> bool { return manage(from, to, mode::move); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
+			void destructive_move(storage_t * from, storage_t * to) const noexcept { manage(from, to, mode::dmove); }
+			void copy(const storage_t * from, storage_t * to) const { manage(const_cast<storage_t *>(from), to, mode::copy); }
 		} * vptr;
 		storage_t storage;
 
@@ -220,26 +221,33 @@ namespace p2548 {
 			static_assert(std::is_copy_constructible_v<T>);
 			static_assert(std::is_nothrow_destructible_v<T>);
 
-			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) { //TODO: must be nothrow_copy_constructible unless SBO will be extremely problematic
+			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) {
 				static constexpr vtable vtable{
-					+[](storage_t * from, storage_t * to, bool destructive) noexcept {
-						if(to) new(to->sbo) T{std::move(*reinterpret_cast<T *>(from->sbo))};
-						if(!to || destructive) reinterpret_cast<T *>(from->sbo)->~T();
+					+[](storage_t * from, storage_t * to, mode m) {
+						if(m == mode::copy) new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)};
+						else { //noexcept:
+							if(m == mode::move || m == mode::dmove) new(to->sbo) T{std::move(*reinterpret_cast<T *>(from->sbo))};
+							if(m == mode::dtor || m == mode::dmove) reinterpret_cast<T *>(from->sbo)->~T();
+						}
 						return false;
 					},
-					+[](const storage_t * from, storage_t * to) { new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)}; },
 					&invoke<T, sbo>
 				};
 				vptr = &vtable;
 				new(storage.sbo) T{std::forward<A>(args)...};
 			} else {
 				static constexpr vtable vtable{
-					+[](storage_t * from, storage_t * to, bool) noexcept {
-						if(to) to->ptr = std::exchange(from->ptr, nullptr);
-						else delete reinterpret_cast<T *>(from->ptr);
+					+[](storage_t * from, storage_t * to, mode m) {
+						switch(m) {
+							case mode::dtor: delete reinterpret_cast<T *>(from->ptr); break;
+							case mode::move: //always "destructive" for heap allocated objects
+							case mode::dmove:
+								to->ptr = std::exchange(from->ptr, nullptr);
+								break;
+							case mode::copy: to->ptr = new T{*reinterpret_cast<const T *>(from->ptr)}; break;
+						}
 						return true;
 					},
-					+[](const storage_t * from, storage_t * to) { to->ptr = new T{*reinterpret_cast<const T *>(from->ptr)}; },
 					&invoke<T, sbo>
 				};
 				vptr = &vtable;
@@ -249,11 +257,7 @@ namespace p2548 {
 
 		void init_empty() noexcept {
 			static constexpr vtable vtable{
-				+[](storage_t *, storage_t * to, bool) noexcept {
-					if(to) to->ptr = nullptr;
-					return false;
-				},
-				+[](const storage_t *, storage_t * to) { to->ptr = nullptr; },
+				+[](storage_t *, storage_t *, mode) { return false; },
 				nullptr
 			};
 			vptr = &vtable;
