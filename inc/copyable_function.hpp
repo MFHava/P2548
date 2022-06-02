@@ -200,13 +200,14 @@ namespace p2548 {
 			char sbo[sizeof(void * ) * 3];
 		};
 		const struct vtable final {
-			auto (*manage)(storage_t *, storage_t *, bool) noexcept -> bool; //TODO: add copying? OR introduce new copy-operation...
+			auto (*manage)(storage_t *, storage_t *, bool) noexcept -> bool;
+			void (*clone)(const storage_t *, storage_t *); //TODO: merge into manage
 			auto (*dispatch)(add_const<storage_t> *, Args...) noexcept(noexcept_) -> Result;
 
-			//TODO: copy based on manage?
 			void dtor(storage_t * self) const noexcept { manage(self, nullptr, false); }
 			auto move(storage_t * from, storage_t * to) const noexcept -> bool { return manage(from, to, false); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
 			void destructive_move(storage_t * from, storage_t * to) const noexcept { manage(from, to, true); }
+			void copy(const storage_t * from, storage_t * to) const { clone(from, to); }
 		} * vptr;
 		storage_t storage;
 
@@ -216,9 +217,8 @@ namespace p2548 {
 
 		template<typename T, typename... A>
 		void init(A &&... args) {
+			static_assert(std::is_copy_constructible_v<T>);
 			static_assert(std::is_nothrow_destructible_v<T>);
-			//TODO: static_assert(std::is_copy_constructible_v<T>);
-			//TODO: static_assert(std::is_copy_assignable_v<T>);
 
 			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) { //TODO: must be nothrow_copy_constructible unless SBO will be extremely problematic
 				static constexpr vtable vtable{
@@ -227,6 +227,7 @@ namespace p2548 {
 						if(!to || destructive) reinterpret_cast<T *>(from->sbo)->~T();
 						return false;
 					},
+					+[](const storage_t * from, storage_t * to) { new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)}; },
 					&invoke<T, sbo>
 				};
 				vptr = &vtable;
@@ -238,6 +239,7 @@ namespace p2548 {
 						else delete reinterpret_cast<T *>(from->ptr);
 						return true;
 					},
+					+[](const storage_t * from, storage_t * to) { to->ptr = new T{*reinterpret_cast<const T *>(from->ptr)}; },
 					&invoke<T, sbo>
 				};
 				vptr = &vtable;
@@ -251,6 +253,7 @@ namespace p2548 {
 					if(to) to->ptr = nullptr;
 					return false;
 				},
+				+[](const storage_t *, storage_t * to) { to->ptr = nullptr; },
 				nullptr
 			};
 			vptr = &vtable;
@@ -287,11 +290,14 @@ namespace p2548 {
 			init<VT>(std::forward<A>(args)...);
 		}
 
-		//TODO: copy-ctor
+		copyable_function(const copyable_function & other) : vptr{other.vptr} { other.vptr->copy(&other.storage, &storage); }
 
 		copyable_function(copyable_function && other) noexcept : vptr{other.vptr} { if(other.vptr->move(&other.storage, &storage)) other.init_empty(); }
 
-		//TODO: copy-assign
+		auto operator=(const copyable_function & other) -> copyable_function & { //TODO: investigate for exception-safe alternative without double-buffering (add copy-is-noexcept to vtable?)
+			copyable_function{other}.swap(*this);
+			return *this;
+		}
 
 		auto operator=(copyable_function && other) noexcept -> copyable_function & {
 			if(this != &other) {

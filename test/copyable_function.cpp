@@ -149,6 +149,45 @@ namespace {
 	static_assert(sizeof(big_func) > sizeof(const_free_throwing));
 }
 
+TEST_CASE("copyable_function copying", "[copyable_function]") {
+	//EMPTY
+	const_free_throwing mf0;
+	REQUIRE(!mf0);
+	const_free_throwing f0{mf0};
+	REQUIRE(!f0);
+	REQUIRE(!mf0);
+
+	//FREE FUNC
+	const_free_throwing mf1{func1};
+	REQUIRE(mf1);
+	const_free_throwing f1{mf1};
+	REQUIRE(f1);
+	REQUIRE(mf1);
+
+	//FREE FUNC PTR
+	const_free_throwing mf2{&func1};
+	REQUIRE(mf2);
+	const_free_throwing f2{mf2};
+	REQUIRE(f2);
+	REQUIRE(mf2);
+
+	//SOO
+	const_free_throwing mf3{std::in_place_type<small_func>, 123};
+	REQUIRE(mf3);
+	const_free_throwing f3{mf3};
+	REQUIRE(f3);
+	REQUIRE(mf3);
+
+	//noSOO
+	const_free_throwing mf4{std::in_place_type<big_func>, 123};
+	REQUIRE(mf4);
+	const_free_throwing f4{mf4};
+	REQUIRE(f4);
+	REQUIRE(mf4);
+
+	//TODO: copy-assignment
+}
+
 TEST_CASE("copyable_function moved-from state", "[copyable_function]") {
 	//EMPTY
 	const_free_throwing mf0;
