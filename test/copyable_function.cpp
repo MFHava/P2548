@@ -68,6 +68,8 @@ TEST_CASE("copyable_function inplace", "[copyable_function]") {
 
 	p2548::copyable_function<int(int) noexcept> func{std::in_place_type<functor>, 10};
 	REQUIRE(func(1) == 11);
+
+	//TODO: initializer_list support
 }
 
 TEST_CASE("copyable_function free copyable_function", "[copyable_function]") {

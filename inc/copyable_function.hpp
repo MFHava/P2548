@@ -9,128 +9,281 @@
 #include <type_traits>
 
 namespace p2548 {
+	//! @brief copyable function wrapper
+	//! @tparam Signature function signature of the contained functor (including potential const-, ref- and noexcept-qualifiers)
+	template<typename... Signature>
+	class copyable_function;
+
 	namespace internal {
-		enum class refness { none, lvalue, rvalue, };
-
-		using none_type = std::integral_constant<refness, refness::none>;
-		using lvalue_type = std::integral_constant<refness, refness::lvalue>;
-		using rvalue_type = std::integral_constant<refness, refness::rvalue>;
-
-
-		template<typename T, refness Ref>
-		struct add_refness;
-
-		template<typename T>
-		struct add_refness<T, refness::none> final { using type = T; };
-
-		template<typename T>
-		struct add_refness<T, refness::lvalue> final { using type = T &; };
-
-		template<typename T>
-		struct add_refness<T, refness::rvalue> final { using type = T &&; };
-
-		template<typename T, refness Ref>
-		using add_refness_t = typename add_refness<T, Ref>::type;
+		template<typename R, typename F, typename... Args>
+		requires std::is_invocable_r_v<R, F, Args...>
+		constexpr
+		auto invoke_r(F && f, Args &&... args) noexcept(std::is_nothrow_invocable_r_v<R, F, Args...>) { //TODO: [C++23] replace with std::invoke_r
+			if constexpr(std::is_void_v<R>) std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+			else return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+		}
 
 
-		template<typename>
+		union storage_t {
+			void * ptr;
+			char sbo[sizeof(void * ) * 3];
+		};
+
+
+		template<typename Impl, typename>
 		struct traits;
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...)> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::false_type;
-			using ref = none_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...)> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...);
+
+			auto operator()(Args... args) -> Result {
+				auto & self{*static_cast<Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) -> Result { return invoke_r<Result, T &>(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, VT, Args...> && std::is_invocable_r_v<Result, VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::false_type;
-			using ref = none_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...);
+
+			auto operator()(Args... args) const -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) -> Result { return invoke_r<Result, const T &>(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, const VT, Args...> && std::is_invocable_r_v<Result, const VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::true_type;
-			using ref = none_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) noexcept -> Result {
+				auto & self{*static_cast<Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, T &>(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, VT, Args...> && std::is_nothrow_invocable_r_v<Result, VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::true_type;
-			using ref = none_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) const noexcept -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, const T &>(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, const VT, Args...> && std::is_nothrow_invocable_r_v<Result, const VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) &> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::false_type;
-			using ref = lvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) &> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...);
+
+			auto operator()(Args... args) & -> Result {
+				auto & self{*static_cast<Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) -> Result { return invoke_r<Result, T &>(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, VT &, Args...> && std::is_invocable_r_v<Result, VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const &> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::false_type;
-			using ref = lvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const &> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...);
+
+			auto operator()(Args... args) const & -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) -> Result { return invoke_r<Result, const T &>(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, const VT &, Args...> && std::is_invocable_r_v<Result, const VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) & noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::true_type;
-			using ref = lvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) & noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) & noexcept -> Result {
+				auto & self{*static_cast<Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, T &>(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, VT &, Args...> && std::is_nothrow_invocable_r_v<Result, VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const & noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::true_type;
-			using ref = lvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const & noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) const & noexcept -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, const T &>(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, const VT &, Args...> && std::is_nothrow_invocable_r_v<Result, const VT &, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) &&> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::false_type;
-			using ref = rvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) &&> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...);
+
+			auto operator()(Args... args) && -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) -> Result { return invoke_r<Result, T &&>(std::move(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr)), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, VT &&, Args...> && std::is_invocable_r_v<Result, VT &&, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const &&> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::false_type;
-			using ref = rvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const &&> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...);
+
+			auto operator()(Args... args) const && -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) -> Result { return invoke_r<Result, const T &&>(std::move(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr)), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_invocable_r_v<Result, const VT &&, Args...> && std::is_invocable_r_v<Result, const VT &&, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) && noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::false_type;
-			using noexcept_ = std::true_type;
-			using ref = rvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) && noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) && noexcept -> Result {
+				auto & self{*static_cast<Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, T &&>(std::move(*reinterpret_cast<T *>(SBO ? ctx->sbo : ctx->ptr)), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, VT &&, Args...> && std::is_nothrow_invocable_r_v<Result, VT &&, Args...>};
 		};
 
-		template<typename Result, typename... Args>
-		struct traits<Result(Args...) const && noexcept> final {
-			using function = Result(Args...);
-			using const_ = std::true_type;
-			using noexcept_ = std::true_type;
-			using ref = rvalue_type;
+		template<typename Impl, typename Result, typename... Args>
+		struct traits<Impl, Result(Args...) const && noexcept> {
+			using result_type = Result;
+			using dispatch_type = Result(*)(const storage_t *, Args...) noexcept;
+
+			auto operator()(Args... args) const && noexcept -> Result {
+				auto & self{*static_cast<const Impl *>(this)};
+				return self.vptr->dispatch(&self.storage, std::forward<Args>(args)...);
+			}
+
+			template<typename T, bool SBO>
+			static
+			auto invoke(const storage_t * ctx, Args... args) noexcept -> Result { return invoke_r<Result, const T &&>(std::move(*reinterpret_cast<const T *>(SBO ? ctx->sbo : ctx->ptr)), std::forward<Args>(args)...); }
+
+			template<typename VT>
+			static
+			constexpr
+			bool is_callable_from{std::is_nothrow_invocable_r_v<Result, const VT &&, Args...> && std::is_nothrow_invocable_r_v<Result, const VT &&, Args...>};
 		};
+
+
+		template<typename...>
+		struct is_function_specialization : std::false_type {};
+
+		template<typename... Ts>
+		struct is_function_specialization<copyable_function<Ts...>> : std::true_type {};
+
+		template<typename... Ts>
+		inline
+		constexpr
+		bool is_function_specialization_v{is_function_specialization<Ts...>::value};
 
 
 		template<typename>
@@ -143,87 +296,39 @@ namespace p2548 {
 		inline
 		constexpr
 		bool is_in_place_type_t_specialization_v{is_in_place_type_t_specialization<T>::value};
-
-
-		template<typename R, typename F, typename... Args>
-		requires std::is_invocable_r_v<R, F, Args...>
-		constexpr
-		auto invoke_r(F && f, Args &&... args) noexcept(std::is_nothrow_invocable_r_v<R, F, Args...>) { //TODO: [C++23] replace with std::invoke_r
-			if constexpr(std::is_void_v<R>) std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-			else return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-		}
 	}
 
-	//! @brief copyable function wrapper
-	//! @tparam Signature function signature of the contained functor (including potential const-, ref- and noexcept-qualifiers)
-	template<typename Signature, typename = typename internal::traits<Signature>::function>
-	class copyable_function;
+	template<typename Signature>
+	class copyable_function<Signature> : internal::traits<copyable_function<Signature>, Signature> {
+		using traits = internal::traits<copyable_function, Signature>;
+		friend traits;
 
-	namespace internal {
-		template<typename...>
-		struct is_function_specialization : std::false_type {};
-
-		template<typename... Ts>
-		struct is_function_specialization<copyable_function<Ts...>> : std::true_type {};
-
-		template<typename... Ts>
-		inline
-		constexpr
-		bool is_function_specialization_v{is_function_specialization<Ts...>::value};
-	}
-
-	template<typename Signature, typename Result, typename... Args>
-	class copyable_function<Signature, Result(Args...)> final {
-		using traits = internal::traits<Signature>;
-
-		using ref_ = typename traits::ref;
-
+		template<typename VT>
 		static
 		constexpr
-		bool const_{typename traits::const_{}},
-		     noexcept_{typename traits::noexcept_{}},
-		     none{ref_{} == internal::refness::none},
-		     lvalue{ref_{} == internal::refness::lvalue},
-		     rvalue{ref_{} == internal::refness::rvalue};
-
-		template<typename T>
-		using add_const = std::conditional_t<const_, const T, T>;
-
-		template<typename T>
-		using add_quals = internal::add_refness_t<add_const<T>, ref_::value>;
-
-		template<typename T>
-		using add_inv_quals = internal::add_refness_t<add_const<T>, ref_::value == internal::refness::none ? internal::refness::lvalue : ref_::value>;
+		bool is_callable_from{traits::template is_callable_from<VT>};
 
 		enum class mode { dtor, move, dmove, copy, };
 
-		union storage_t {
-			void * ptr;
-			char sbo[sizeof(void * ) * 3];
-		};
 		const struct vtable final {
-			auto (*manage)(storage_t *, storage_t *, mode) -> bool;
-			auto (*dispatch)(add_const<storage_t> *, Args...) noexcept(noexcept_) -> Result;
+			auto (*manage)(internal::storage_t *, internal::storage_t *, mode) -> bool;
+			typename traits::dispatch_type dispatch;
 
-			void dtor(storage_t * self) const noexcept { manage(self, nullptr, mode::dtor); }
-			auto move(storage_t * from, storage_t * to) const noexcept -> bool { return manage(from, to, mode::move); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
-			void destructive_move(storage_t * from, storage_t * to) const noexcept { manage(from, to, mode::dmove); }
-			void copy(const storage_t * from, storage_t * to) const { manage(const_cast<storage_t *>(from), to, mode::copy); }
+			void dtor(internal::storage_t * self) const noexcept { manage(self, nullptr, mode::dtor); }
+			auto move(internal::storage_t * from, internal::storage_t * to) const noexcept -> bool { return manage(from, to, mode::move); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
+			void destructive_move(internal::storage_t * from, internal::storage_t * to) const noexcept { manage(from, to, mode::dmove); }
+			void copy(const internal::storage_t * from, internal::storage_t * to) const { manage(const_cast<internal::storage_t *>(from), to, mode::copy); }
 		} * vptr;
-		storage_t storage;
-
-		template<typename T, bool SBO>
-		static
-		auto invoke(add_const<storage_t> * ctx, Args... args) noexcept(noexcept_) -> Result { return internal::invoke_r<Result>(static_cast<add_inv_quals<T>>(*reinterpret_cast<add_const<T> *>(SBO ? ctx->sbo : ctx->ptr)), std::forward<Args>(args)...); }
+		internal::storage_t storage;
 
 		template<typename T, typename... A>
 		void init(A &&... args) {
 			static_assert(std::is_copy_constructible_v<T>);
 			static_assert(std::is_nothrow_destructible_v<T>);
 
-			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) {
+			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(internal::storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) {
 				static constexpr vtable vtable{
-					+[](storage_t * from, storage_t * to, mode m) {
+					+[](internal::storage_t * from, internal::storage_t * to, mode m) {
 						if(m == mode::copy) new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)};
 						else { //noexcept:
 							if(m == mode::move || m == mode::dmove) new(to->sbo) T{std::move(*reinterpret_cast<T *>(from->sbo))};
@@ -231,13 +336,13 @@ namespace p2548 {
 						}
 						return false;
 					},
-					&invoke<T, sbo>
+					&traits::template invoke<T, sbo>
 				};
 				vptr = &vtable;
 				new(storage.sbo) T{std::forward<A>(args)...};
 			} else {
 				static constexpr vtable vtable{
-					+[](storage_t * from, storage_t * to, mode m) {
+					+[](internal::storage_t * from, internal::storage_t * to, mode m) {
 						switch(m) {
 							case mode::dtor: delete reinterpret_cast<T *>(from->ptr); break;
 							case mode::move: //always "destructive" for heap allocated objects
@@ -248,7 +353,7 @@ namespace p2548 {
 						}
 						return true;
 					},
-					&invoke<T, sbo>
+					&traits::template invoke<T, sbo>
 				};
 				vptr = &vtable;
 				storage.ptr = new T{std::forward<A>(args)...};
@@ -257,18 +362,14 @@ namespace p2548 {
 
 		void init_empty() noexcept {
 			static constexpr vtable vtable{
-				+[](storage_t *, storage_t *, mode) { return false; },
+				+[](internal::storage_t *, internal::storage_t *, mode) { return false; },
 				nullptr
 			};
 			vptr = &vtable;
 		}
-
-		template<typename VT>
-		static
-		constexpr
-		bool is_callable_from{noexcept_ ? std::is_nothrow_invocable_r_v<Result, add_quals<VT>, Args...> && std::is_nothrow_invocable_r_v<Result, add_inv_quals<VT>, Args...>
-		                                : std::is_invocable_r_v<Result, add_quals<VT>, Args...> && std::is_invocable_r_v<Result, add_inv_quals<VT>, Args...>};
 	public:
+		using typename traits::result_type;
+
 		copyable_function() noexcept { init_empty(); }
 		copyable_function(std::nullptr_t) noexcept : copyable_function{} {}
 
@@ -292,6 +393,15 @@ namespace p2548 {
 			using VT = std::decay_t<T>;
 			static_assert(std::is_same_v<VT, std::decay_t<T>>);
 			init<VT>(std::forward<A>(args)...);
+		}
+
+		template<typename T, typename U, typename... A>
+		requires(std::is_constructible_v<std::decay_t<T>, A &&...> && is_callable_from<std::decay_t<T>>)
+		explicit
+		copyable_function(std::in_place_type_t<T>, std::initializer_list<U> ilist, A &&... args) {
+			using VT = std::decay_t<T>;
+			static_assert(std::is_same_v<VT, std::decay_t<T>>);
+			init<VT>(ilist, std::forward<A>(args)...);
 		}
 
 		copyable_function(const copyable_function & other) : vptr{other.vptr} { other.vptr->copy(&other.storage, &storage); }
@@ -327,16 +437,11 @@ namespace p2548 {
 		explicit
 		operator bool() const noexcept { return vptr->dispatch; }
 
-		auto operator()(Args... args) noexcept(noexcept_) -> Result requires(!const_ && none) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
-		auto operator()(Args... args) const noexcept(noexcept_) -> Result requires(const_ && none) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
-		auto operator()(Args... args) & noexcept(noexcept_) -> Result requires(!const_ && lvalue) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
-		auto operator()(Args... args) const & noexcept(noexcept_) -> Result requires(const_ && lvalue) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
-		auto operator()(Args... args) && noexcept(noexcept_) -> Result requires(!const_ && rvalue) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
-		auto operator()(Args... args) const && noexcept(noexcept_) -> Result requires(const_ && rvalue) { return vptr->dispatch(&storage, std::forward<Args>(args)...); }
+		using traits::operator();
 
 		void swap(copyable_function & other) noexcept {
 			if(this == &other) return;
-			storage_t tmp;
+			internal::storage_t tmp;
 			vptr->destructive_move(&storage, &tmp);
 			other.vptr->destructive_move(&other.storage, &storage);
 			vptr->destructive_move(&tmp, &other.storage);
