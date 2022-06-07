@@ -308,15 +308,14 @@ namespace p2548 {
 		constexpr
 		bool is_callable_from{traits::template is_callable_from<VT>};
 
-		enum class mode { dtor, move, dmove, copy, };
+		enum class mode { dtor, move, copy, };
 
 		const struct vtable final {
-			auto (*manage)(internal::storage_t *, internal::storage_t *, mode) -> bool;
+			void (*manage)(internal::storage_t *, internal::storage_t *, mode);
 			typename traits::dispatch_type dispatch;
 
 			void dtor(internal::storage_t * self) const noexcept { manage(self, nullptr, mode::dtor); }
-			auto move(internal::storage_t * from, internal::storage_t * to) const noexcept -> bool { return manage(from, to, mode::move); } //returns true => heap-allocated object was moved; from is now empty => storage & vptr must be reset...
-			void destructive_move(internal::storage_t * from, internal::storage_t * to) const noexcept { manage(from, to, mode::dmove); }
+			void move(internal::storage_t * from, internal::storage_t * to) const noexcept { manage(from, to, mode::move); }
 			void copy(const internal::storage_t * from, internal::storage_t * to) const { manage(const_cast<internal::storage_t *>(from), to, mode::copy); }
 		} * vptr;
 		internal::storage_t storage;
@@ -329,12 +328,17 @@ namespace p2548 {
 			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(internal::storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) {
 				static constexpr vtable vtable{
 					+[](internal::storage_t * from, internal::storage_t * to, mode m) {
-						if(m == mode::copy) new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)};
-						else { //noexcept:
-							if(m == mode::move || m == mode::dmove) new(to->sbo) T{std::move(*reinterpret_cast<T *>(from->sbo))};
-							if(m == mode::dtor || m == mode::dmove) reinterpret_cast<T *>(from->sbo)->~T();
+						switch(m) {
+							case mode::copy:
+								new(to->sbo) T{*reinterpret_cast<const T *>(from->sbo)};
+								break;
+							case mode::move:
+								new(to->sbo) T{std::move(*reinterpret_cast<T *>(from->sbo))};
+								[[fallthrough]];
+							case mode::dtor:
+								reinterpret_cast<T *>(from->sbo)->~T();
+								break;
 						}
-						return false;
 					},
 					&traits::template invoke<T, sbo>
 				};
@@ -344,14 +348,16 @@ namespace p2548 {
 				static constexpr vtable vtable{
 					+[](internal::storage_t * from, internal::storage_t * to, mode m) {
 						switch(m) {
-							case mode::dtor: delete reinterpret_cast<T *>(from->ptr); break;
-							case mode::move: //always "destructive" for heap allocated objects
-							case mode::dmove:
+							case mode::dtor:
+								delete reinterpret_cast<T *>(from->ptr);
+								break;
+							case mode::move:
 								to->ptr = std::exchange(from->ptr, nullptr);
 								break;
-							case mode::copy: to->ptr = new T{*reinterpret_cast<const T *>(from->ptr)}; break;
+							case mode::copy:
+								to->ptr = new T{*reinterpret_cast<const T *>(from->ptr)};
+								break;
 						}
-						return true;
 					},
 					&traits::template invoke<T, sbo>
 				};
@@ -362,7 +368,7 @@ namespace p2548 {
 
 		void init_empty() noexcept {
 			static constexpr vtable vtable{
-				+[](internal::storage_t *, internal::storage_t *, mode) { return false; },
+				+[](internal::storage_t *, internal::storage_t *, mode) {},
 				nullptr
 			};
 			vptr = &vtable;
@@ -406,7 +412,10 @@ namespace p2548 {
 
 		copyable_function(const copyable_function & other) : vptr{other.vptr} { other.vptr->copy(&other.storage, &storage); }
 
-		copyable_function(copyable_function && other) noexcept : vptr{other.vptr} { if(other.vptr->move(&other.storage, &storage)) other.init_empty(); }
+		copyable_function(copyable_function && other) noexcept : vptr{other.vptr} {
+			other.vptr->move(&other.storage, &storage);
+			other.init_empty();
+		}
 
 		auto operator=(const copyable_function & other) -> copyable_function & { //TODO: investigate for exception-safe alternative without double-buffering (add copy-is-noexcept to vtable?)
 			copyable_function{other}.swap(*this);
@@ -417,7 +426,8 @@ namespace p2548 {
 			if(this != &other) {
 				vptr->dtor(&storage);
 				vptr = other.vptr;
-				if(other.vptr->move(&other.storage, &storage)) other.init_empty();
+				other.vptr->move(&other.storage, &storage);
+				other.init_empty();
 			}
 			return *this;
 		}
@@ -442,9 +452,9 @@ namespace p2548 {
 		void swap(copyable_function & other) noexcept {
 			if(this == &other) return;
 			internal::storage_t tmp;
-			vptr->destructive_move(&storage, &tmp);
-			other.vptr->destructive_move(&other.storage, &storage);
-			vptr->destructive_move(&tmp, &other.storage);
+			vptr->move(&storage, &tmp);
+			other.vptr->move(&other.storage, &storage);
+			vptr->move(&tmp, &other.storage);
 			std::swap(vptr, other.vptr);
 		}
 		friend
