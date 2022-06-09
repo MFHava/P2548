@@ -323,7 +323,7 @@ namespace p2548 {
 		template<typename T, typename... A>
 		void init(A &&... args) {
 			static_assert(std::is_copy_constructible_v<T>);
-			static_assert(std::is_nothrow_destructible_v<T>);
+			//PRECONDITION: static_assert(std::is_nothrow_destructible_v<T>);
 
 			if constexpr(constexpr auto sbo{sizeof(T) <= sizeof(internal::storage_t::sbo) && std::is_nothrow_move_constructible_v<T>}; sbo) {
 				static constexpr vtable vtable{
@@ -422,7 +422,7 @@ namespace p2548 {
 			return *this;
 		}
 
-		auto operator=(copyable_function && other) noexcept -> copyable_function & {
+		auto operator=(copyable_function && other) /*noexcept*/ -> copyable_function & { //NOTE: not noexcept for potential future allocator support (same for move_only_function and function)
 			if(this != &other) {
 				vptr->dtor(&storage);
 				vptr = other.vptr;
