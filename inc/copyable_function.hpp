@@ -402,7 +402,7 @@ namespace p2548 {
 		}
 
 		template<typename T, typename U, typename... A>
-		requires(std::is_constructible_v<std::decay_t<T>, A &&...> && is_callable_from<std::decay_t<T>>)
+		requires(std::is_constructible_v<std::decay_t<T>, std::initializer_list<U> &, A &&...> && is_callable_from<std::decay_t<T>>)
 		explicit
 		copyable_function(std::in_place_type_t<T>, std::initializer_list<U> ilist, A &&... args) {
 			using VT = std::decay_t<T>;

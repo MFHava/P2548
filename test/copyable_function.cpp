@@ -60,16 +60,22 @@ TEST_CASE("copyable_function nullptr", "[copyable_function]") {
 TEST_CASE("copyable_function inplace", "[copyable_function]") {
 	struct functor {
 		functor(int x) : x{x} {}
+		functor(std::initializer_list<int> ilist) : x{std::accumulate(ilist.begin(), ilist.end(), 0)} {}
+		functor(std::initializer_list<int> ilist, int x) : functor{ilist} { this->x += x; }
 
 		auto operator()(int y) noexcept -> int { return x + y; }
 	private:
 		int x;
 	};
 
-	p2548::copyable_function<int(int) noexcept> func{std::in_place_type<functor>, 10};
-	REQUIRE(func(1) == 11);
+	p2548::copyable_function<int(int) noexcept> func0{std::in_place_type<functor>, 10};
+	REQUIRE(func0(1) == 11);
+	
+	p2548::copyable_function<int(int) noexcept> func1{std::in_place_type<functor>, {11, 12}};
+	REQUIRE(func1(1) == 24);
 
-	//TODO: initializer_list support
+	p2548::copyable_function<int(int) noexcept> func2{std::in_place_type<functor>, {11, 12}, 11};
+	REQUIRE(func2(1) == 35);
 }
 
 TEST_CASE("copyable_function free copyable_function", "[copyable_function]") {
@@ -94,7 +100,7 @@ TEST_CASE("copyable_function free copyable_function ptr", "[copyable_function]")
 	REQUIRE(cref2() == 1);
 }
 
-TEST_CASE("copyable_function member copyable_function ptr", "[copyable_function]") { //TODO: more substantial unit test
+TEST_CASE("copyable_function member copyable_function ptr", "[copyable_function]") {
 	struct X {
 		int val;
 
