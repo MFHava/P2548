@@ -6,6 +6,7 @@
 
 #pragma once
 #include <utility>
+#include <functional>
 #include <type_traits>
 
 namespace p2548 {
@@ -418,7 +419,11 @@ namespace p2548 {
 		}
 
 		auto operator=(const copyable_function & other) -> copyable_function & { //TODO: investigate for exception-safe alternative without double-buffering (add copy-is-noexcept to vtable?)
-			copyable_function{other}.swap(*this);
+			copyable_function tmp{other};
+			vptr->dtor(&storage);
+			vptr = tmp.vptr;
+			tmp.vptr->move(&tmp.storage, &storage);
+			tmp.init_empty();
 			return *this;
 		}
 
@@ -437,6 +442,7 @@ namespace p2548 {
 		}
 
 		template<typename F>
+		requires(!std::is_same_v<copyable_function, std::remove_cvref_t<F>>)
 		auto operator=(F && func) -> copyable_function & {
 			copyable_function{std::forward<F>(func)}.swap(*this);
 			return *this;
