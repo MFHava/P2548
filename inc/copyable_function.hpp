@@ -461,7 +461,7 @@ namespace p2548 {
 		move_only_function() noexcept : vptr{vtable::init_empty()} {}
 		move_only_function(std::nullptr_t) noexcept : move_only_function{} {}
 
-		template<typename F, typename = std::enable_if_t<(!std::is_same_v<move_only_function, std::remove_cvref_t<F>> && !internal_function::is_copyable_function_specialization_v<std::remove_cvref_t<F>> && !internal_function::is_in_place_type_t_specialization_v<std::remove_cvref_t<F>> && is_callable_from<std::decay_t<F>>)>> //TODO: [C++20] replace with concepts/requires-clause
+		template<typename F, typename = std::enable_if_t<(!std::is_same_v<move_only_function, std::remove_cvref_t<F>> && !internal_function::is_in_place_type_t_specialization_v<std::remove_cvref_t<F>> && is_callable_from<std::decay_t<F>>)>> //TODO: [C++20] replace with concepts/requires-clause
 		move_only_function(F && func) {
 			using VT = std::decay_t<F>;
 			static_assert(std::is_constructible_v<VT, F>);
@@ -618,21 +618,6 @@ namespace p2548 {
 
 		explicit
 		operator bool() const noexcept { return vptr->dispatch; }
-
-		explicit
-		operator move_only_function<Signature>() const & {
-			move_only_function<Signature> result;
-			vptr->copy(&storage, &result.storage);
-			result.vptr = vptr;
-			return result;
-		}
-		operator move_only_function<Signature>() && noexcept {
-			move_only_function<Signature> result;
-			vptr->destructive_move(&storage, &result.storage);
-			result.vptr = vptr;
-			vptr = vtable::init_empty();
-			return result;
-		}
 
 		void swap(copyable_function & other) noexcept { vtable::swap(vptr, storage, other.vptr, other.storage); }
 		friend
