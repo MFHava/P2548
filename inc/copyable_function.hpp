@@ -10,19 +10,6 @@
 #include <type_traits>
 
 namespace p2548 {
-	// nontype argument tag
-	template<auto V>
-	struct nontype_t {
-		explicit
-		nontype_t() =default;
-	};
-
-	template<auto V>
-	inline
-	constexpr
-	nontype_t<V> nontype{};
-
-
 	//! @brief move-only function wrapper
 	//! @tparam Signature function signature of the contained functor (including potential const-, ref- and noexcept-qualifiers)
 	template<typename... Signature>
@@ -147,21 +134,6 @@ namespace p2548 {
 				return &vtable;
 			}
 
-			template<auto f, bool Copyable, typename T, typename... A>
-			static
-			auto init_nontype_obj(storage_t & storage, A &&... args) -> const vtable * {
-				construct<Copyable, T>(storage, std::forward<A>(args)...);
-				static constexpr vtable vtable{&owning_manage<Copyable, T>, &Traits::template nontype_obj<f, T, sbo<T>>};
-				return &vtable;
-			}
-
-			template<auto f>
-			static
-			auto init_nontype_noobj() noexcept -> const vtable * {
-				static constexpr vtable vtable{&nop_manage, &Traits::template nontype_noobj<f>};
-				return &vtable;
-			}
-
 			static
 			auto init_empty() noexcept -> const vtable * {
 				static constexpr vtable vtable{&nop_manage, nullptr};
@@ -194,14 +166,6 @@ namespace p2548 {
 			template<typename T, bool SBO>
 			static
 			auto functor(const_<storage_t> * ctx, Args... args) noexcept(Noexcept) -> Result { return std::invoke_r<Result>(get<T, SBO>(ctx), std::forward<Args>(args)...); }
-
-			template<auto f>
-			static
-			auto nontype_noobj(const_<storage_t> *, Args... args) noexcept(Noexcept) -> Result { return std::invoke_r<Result>(f, std::forward<Args>(args)...); }
-
-			template<auto f, typename T, bool SBO>
-			static
-			auto nontype_obj(const_<storage_t> * ctx, Args... args) noexcept(Noexcept) -> Result { return std::invoke_r<Result>(f, get<T, SBO>(ctx), std::forward<Args>(args)...); }
 		};
 
 
@@ -491,11 +455,6 @@ namespace p2548 {
 		constexpr
 		bool is_callable_from{is_invocable_using<typename traits::template quals<VT>> && is_invocable_using<typename traits::template inv_quals<VT>>};
 
-		template<auto f, typename VT>
-		static
-		constexpr
-		bool is_callable_as_if_from{is_invocable_using<decltype(f), typename traits::template inv_quals<VT>>};
-
 		const vtable * vptr;
 		internal_function::storage_t storage;
 	public:
@@ -533,33 +492,6 @@ namespace p2548 {
 		move_only_function(const move_only_function &) =delete;
 
 		move_only_function(move_only_function && other) noexcept { vtable::move_ctor(vptr, storage, other.vptr, other.storage); }
-
-		template<auto f>
-		requires(is_invocable_using<decltype(f)>)
-		move_only_function(nontype_t<f>) noexcept : vptr{vtable::template init_nontype_noobj<f>()} {}
-
-		template<auto f, typename T>
-		requires(is_callable_as_if_from<f, std::decay_t<T>>)
-		move_only_function(nontype_t<f>, T && x) {
-			static_assert(std::is_constructible_v<std::decay_t<T>, T>);
-			vptr = vtable::template init_nontype_obj<f, false, std::decay_t<T>>(storage, std::forward<T>(x));
-		}
-
-		template<auto f, typename T, typename... A>
-		requires(std::is_constructible_v<std::decay_t<T>, A &&...> && is_callable_as_if_from<f, std::decay_t<T>>)
-		explicit
-		move_only_function(nontype_t<f>, std::in_place_type_t<T>, A &&... args) {
-			static_assert(std::is_same_v<T, std::decay_t<T>>);
-			vptr = vtable::template init_nontype_obj<f, false, T>(storage, std::forward<A>(args)...);
-		}
-
-		template<auto f, typename T, typename U, typename... A>
-		requires(std::is_constructible_v<std::decay_t<T>, std::initializer_list<U> &, A &&...> && is_callable_as_if_from<f, std::decay_t<T>>)
-		explicit
-		move_only_function(nontype_t<f>, std::in_place_type_t<T>, std::initializer_list<U> ilist, A &&... args) {
-			static_assert(std::is_same_v<T, std::decay_t<T>>);
-			vptr = vtable::template init_nontype_obj<f, false, T>(storage, ilist, std::forward<A>(args)...);
-		}
 
 		auto operator=(const move_only_function &) -> move_only_function & =delete;
 
@@ -610,11 +542,6 @@ namespace p2548 {
 		constexpr
 		bool is_callable_from{is_invocable_using<typename traits::template quals<VT>> && is_invocable_using<typename traits::template inv_quals<VT>>};
 
-		template<auto f, typename VT>
-		static
-		constexpr
-		bool is_callable_as_if_from{is_invocable_using<decltype(f), typename traits::template inv_quals<VT>>};
-
 		const vtable * vptr;
 		internal_function::storage_t storage;
 	public:
@@ -653,33 +580,6 @@ namespace p2548 {
 		copyable_function(const copyable_function & other) : vptr{other.vptr} { other.vptr->copy(&other.storage, &storage); }
 
 		copyable_function(copyable_function && other) noexcept { vtable::move_ctor(vptr, storage, other.vptr, other.storage); }
-
-		template<auto f>
-		requires(is_invocable_using<decltype(f)>)
-		copyable_function(nontype_t<f>) noexcept : vptr{ vtable::template init_nontype_noobj<f>() } {}
-
-		template<auto f, typename T>
-		requires(is_callable_as_if_from<f, std::decay_t<T>>)
-		copyable_function(nontype_t<f>, T&& x) {
-			static_assert(std::is_constructible_v<std::decay_t<T>, T>);
-			vptr = vtable::template init_nontype_obj<f, true, std::decay_t<T>>(storage, std::forward<T>(x));
-		}
-
-		template<auto f, typename T, typename... A>
-		requires(std::is_constructible_v<std::decay_t<T>, A &&...>&& is_callable_as_if_from<f, std::decay_t<T>>)
-		explicit
-		copyable_function(nontype_t<f>, std::in_place_type_t<T>, A &&... args) {
-			static_assert(std::is_same_v<T, std::decay_t<T>>);
-			vptr = vtable::template init_nontype_obj<f, true, T>(storage, std::forward<A>(args)...);
-		}
-
-		template<auto f, typename T, typename U, typename... A>
-		requires(std::is_constructible_v<std::decay_t<T>, std::initializer_list<U>&, A &&...>&& is_callable_as_if_from<f, std::decay_t<T>>)
-		explicit
-		copyable_function(nontype_t<f>, std::in_place_type_t<T>, std::initializer_list<U> ilist, A &&... args) {
-			static_assert(std::is_same_v<T, std::decay_t<T>>);
-			vptr = vtable::template init_nontype_obj<f, true, T>(storage, ilist, std::forward<A>(args)...);
-		}
 
 		auto operator=(const copyable_function & other) -> copyable_function & {
 			if(this != &other) {

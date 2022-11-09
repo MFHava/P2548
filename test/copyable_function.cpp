@@ -240,33 +240,6 @@ namespace {
 	}
 
 	template<template<typename...> typename Function>
-	void test_nontype() {
-		Function<int()> f0{p2548::nontype<func1>};
-		REQUIRE(f0() == func1());
-		f0 = p2548::nontype<func2>;
-		REQUIRE(f0() == func2());
-
-		Function<int() &&> f1{p2548::nontype<func3>};
-		REQUIRE(std::move(f1)() == func3());
-
-		non_func nf{10};
-		Function<int()> f2{p2548::nontype<&non_func::do_>, nf};
-		REQUIRE(f2() == nf.do_());
-		Function<int()> f3{p2548::nontype<&non_func::do_>, &nf};
-		REQUIRE(f3() == nf.do_());
-
-		Function<int()> f4{p2548::nontype<call>, std::in_place_type<non_func>, 3};
-		REQUIRE(f4() == 3);
-
-		Function<int()> f5{p2548::nontype<call>, std::in_place_type<non_func>, {1, 2, 3}};
-		REQUIRE(f5() == 3);
-		Function<int()> f6{p2548::nontype<call>, std::in_place_type<non_func>, {1, 2, 3}, 10};
-		REQUIRE(f6() == 3);
-		Function<int()> f7{p2548::nontype<call>, std::in_place_type<non_func>, std::initializer_list<int>{}, 10};
-		REQUIRE(f7() == 10);
-	}
-
-	template<template<typename...> typename Function>
 	void test_moved_from_state() {
 		static_assert(sizeof(small_func) <= sizeof(Function<int() const>));
 		static_assert(sizeof(big_func) > sizeof(Function<int() const>));
@@ -406,9 +379,6 @@ TEST_CASE("copyable_function member function ptr", "[copyable_function]") { test
 
 TEST_CASE("move_only_function functor", "[move_only_function]") { test_functor<p2548::move_only_function>(); }
 TEST_CASE("copyable_function functor", "[copyable_function]") { test_functor<p2548::copyable_function>(); }
-
-TEST_CASE("move_only_function nontype", "[move_only_function]") { test_nontype<p2548::move_only_function>(); }
-TEST_CASE("copyable_function nontype", "[copyable_function]") { test_nontype<p2548::copyable_function>(); }
 
 TEST_CASE("move_only_function move ctor", "[move_only_function]") { test_move_ctor<p2548::move_only_function>(); }
 TEST_CASE("copyable_function move ctor", "[copyable_function]") { test_move_ctor<p2548::copyable_function>(); }
