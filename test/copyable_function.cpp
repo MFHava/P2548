@@ -477,6 +477,84 @@ TEST_CASE("copyable_function copy assign", "[copyable_function]") {
 	REQUIRE(mf4);
 }
 
+TEST_CASE("copyable_function conversion", "[move_only_function] [copyable_function]") {
+	//EMPTY
+	p2548::copyable_function<int() const> cf0;
+	REQUIRE(!cf0);
+	p2548::move_only_function<int() const> f0a{cf0};
+	REQUIRE(!cf0);
+	REQUIRE(!f0a);
+	p2548::move_only_function<int() const> f0b{std::move(cf0)};
+	REQUIRE(!cf0);
+	REQUIRE(!f0a);
+	REQUIRE(!f0b);
+
+	//FREE FUNC
+	p2548::copyable_function<int() const> cf1{func1};
+	REQUIRE(cf1);
+	REQUIRE(cf1() == func1());
+	p2548::move_only_function<int() const> f1a{cf1};
+	REQUIRE(cf1);
+	REQUIRE(cf1() == func1());
+	REQUIRE(f1a);
+	REQUIRE(f1a() == func1());
+	p2548::move_only_function<int() const> f1b{std::move(cf1)};
+	REQUIRE(!cf1);
+	REQUIRE(f1a);
+	REQUIRE(f1a() == func1());
+	REQUIRE(f1b);
+	REQUIRE(f1b() == func1());
+
+	//FREE FUNC PTR
+	p2548::copyable_function<int() const> cf2{&func1};
+	REQUIRE(cf2);
+	REQUIRE(cf2() == func1());
+	p2548::move_only_function<int() const> f2a{cf2};
+	REQUIRE(cf2);
+	REQUIRE(cf2() == func1());
+	REQUIRE(f2a);
+	REQUIRE(f2a() == func1());
+	p2548::move_only_function<int() const> f2b{std::move(cf2)};
+	REQUIRE(!cf2);
+	REQUIRE(f2a);
+	REQUIRE(f2a() == func1());
+	REQUIRE(f2b);
+	REQUIRE(f2b() == func1());
+
+	//SOO
+	p2548::copyable_function<int() const> cf3{std::in_place_type<small_func>, 123};
+	REQUIRE(cf3);
+	REQUIRE(cf3() == 123);
+	p2548::move_only_function<int() const> f3a{cf3};
+	REQUIRE(cf3);
+	REQUIRE(cf3() == 123);
+	REQUIRE(f3a);
+	REQUIRE(f3a() == 123);
+	p2548::move_only_function<int() const> f3b{std::move(cf3)};
+	REQUIRE(!cf3);
+	REQUIRE(f3a);
+	REQUIRE(f3a() == 123);
+	REQUIRE(f3b);
+	REQUIRE(f3b() == 123);
+
+	//noSOO
+	p2548::copyable_function<int() const> cf4{std::in_place_type<big_func>, 123};
+	REQUIRE(cf4);
+	REQUIRE(cf4() == 123);
+	p2548::move_only_function<int() const> f4a{cf4};
+	REQUIRE(cf4);
+	REQUIRE(cf4() == 123);
+	REQUIRE(f4a);
+	REQUIRE(f4a() == 123);
+	p2548::move_only_function<int() const> f4b{std::move(cf4)};
+	REQUIRE(!cf4);
+	REQUIRE(f4a);
+	REQUIRE(f4a() == 123);
+	REQUIRE(f4b);
+	REQUIRE(f4b() == 123);
+}
+
+
 TEST_CASE("move_only_function move-only ctor", "[move_only_function]") {
 	class functor final {
 		int val;

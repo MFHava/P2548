@@ -443,7 +443,6 @@ namespace p2548 {
 		using traits = internal_function::traits<Signature>;
 		using vtable = internal_function::vtable<traits>;
 		friend internal_function::function_call<move_only_function, Signature>;
-		friend copyable_function<Signature>;
 
 		template<typename... T>
 		static
@@ -465,12 +464,19 @@ namespace p2548 {
 		move_only_function(F && func) {
 			using VT = std::decay_t<F>;
 			static_assert(std::is_constructible_v<VT, F>);
-			if constexpr(std::is_function_v<std::remove_pointer_t<F>> || std::is_member_pointer_v<F> || internal_function::is_move_only_function_specialization_v<std::remove_cvref_t<F>>)
-				if(!func) {
-					vptr = vtable::init_empty();
-					return;
+			if constexpr(std::is_function_v<std::remove_pointer_t<F>> || std::is_member_pointer_v<F> || internal_function::is_move_only_function_specialization_v<std::remove_cvref_t<F>>) {
+				if(!func) vptr = vtable::init_empty();
+				else vptr = vtable::template init_functor<false, VT>(storage, std::forward<F>(func));
+			} else if constexpr(typedef copyable_function<Signature> copyable; /*TODO: [C++23] use using instead of typedef here...*/ std::is_same_v<std::remove_cvref_t<F>, copyable>) { //prevent double-wrapping
+				if constexpr(std::is_same_v<F, copyable>) {
+					vptr = func.vptr;
+					func.vptr->destructive_move(&func.storage, &storage);
+					func.vptr = vtable::init_empty();
+				} else {
+					vptr = func.vptr;
+					func.vptr->copy(&func.storage, &storage);
 				}
-			vptr = vtable::template init_functor<false, VT>(storage, std::forward<F>(func));
+			} else vptr = vtable::template init_functor<false, VT>(storage, std::forward<F>(func));
 		}
 
 		template<typename T, typename... A>
@@ -531,6 +537,7 @@ namespace p2548 {
 		using traits = internal_function::traits<Signature>;
 		using vtable = internal_function::vtable<traits>;
 		friend internal_function::function_call<copyable_function, Signature>;
+		friend move_only_function<Signature>;
 
 		template<typename... T>
 		static
