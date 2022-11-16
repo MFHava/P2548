@@ -467,7 +467,7 @@ namespace p2548 {
 			if constexpr(std::is_function_v<std::remove_pointer_t<F>> || std::is_member_pointer_v<F> || internal_function::is_move_only_function_specialization_v<std::remove_cvref_t<F>>) {
 				if(!func) vptr = vtable::init_empty();
 				else vptr = vtable::template init_functor<false, VT>(storage, std::forward<F>(func));
-			} else if constexpr(typedef copyable_function<Signature> copyable; /*TODO: [C++23] use using instead of typedef here...*/ std::is_same_v<std::remove_cvref_t<F>, copyable>) { //prevent double-wrapping
+			} else if constexpr(typedef copyable_function<Signature> copyable; /*TODO: [C++23] use using instead of typedef here...*/ std::is_same_v<std::remove_cvref_t<F>, copyable>) { //QoI: prevent double-wrapping
 				if constexpr(std::is_same_v<F, copyable>) {
 					vptr = func.vptr;
 					func.vptr->destructive_move(&func.storage, &storage);
